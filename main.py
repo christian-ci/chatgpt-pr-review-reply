@@ -4,8 +4,7 @@ from typing import Iterable, List, Tuple
 from argparse import ArgumentParser
 from re import search
 import openai
-from github import Github, PullRequest, Commit
-
+from github import Github, PullRequest, Commit, IssueComment
 
 def code_type(filename: str) -> str | None:
     match = search(r"^.*\.([^.]*)$", filename)
@@ -19,6 +18,8 @@ def code_type(filename: str) -> str | None:
                 return "Java"
             case "py":
                 return "Python"
+            case "sh":
+                return "Bash"
 
 
 def prompt(filename: str, contents: str) -> str:
@@ -37,7 +38,8 @@ def prompt(filename: str, contents: str) -> str:
            "   - is the code well documented?\n" \
            "   - can you identify possible performance improvements for this code?\n" \
            "At the end of your answer, please summarize and explain what changes should be performed in the " \
-           "provided Java code to improve its quality\n" \
+           "provided code to improve its quality\n" \
+           "If a question doesn't have a new suggestion omit it from your answer." \
            f"```\n{contents}\n```"
 
 
@@ -73,6 +75,49 @@ def review(filename: str, content: str, model: str, temperature: float, max_toke
     return f"*ChatGPT review for {filename}:*\n" \
            f"{chat_review}"
 
+def handle_replies(github_token: str, api_key: str, model: str, temperature: float, max_tokens: int):
+    g = Github(github_token)
+    repo = g.get_repo(os.getenv("GITHUB_REPOSITORY"))
+    pull = repo.get_pull(args.github_pr_id)
+    openai.api_key = api_key
+
+    # Get comments
+    comments = pull.get_issue_comments()
+
+    for comment in comments:
+        if comment.user.login == "github-actions[bot]":
+            # Find replies to the bot's comment
+            replies = [reply for reply in comments if reply.reply_to_id == comment.id and reply.user.login != "github-actions[bot]"]
+
+            for reply in replies:
+                # Check if the reply is already handled by the bot
+                bot_replies = [bot_reply for bot_reply in comments if bot_reply.reply_to_id == reply.id and bot_reply.user.login == "github-actions[bot]"]
+                if bot_replies:
+                    print(f"Skipped already handled reply from {reply.user.login}: {reply.body}")
+                    continue
+
+                # Get the reply content and generate a response
+                question = reply.body
+                response = openai.Completion.create(
+                    engine=model,
+                    prompt=f"{question}\n\n{reply.original_commit_id}:\n{reply.path} line {reply.original_position}\n```{reply.diff_hunk}```",
+                    temperature=temperature,
+                    max_tokens=max_tokens,
+                    top_p=1,
+                    frequency_penalty=0,
+                    presence_penalty=0,
+                )
+
+                # Post the response as a comment reply
+                reply.create_reply(response.choices[0].text)
+
+                # You can mark the reply as handled by deleting it, adding a label, or any other method.
+                # In this case, we'll just print that the reply has been handled.
+                print(f"Handled reply from {reply.user.login}: {reply.body}")
+
+        else:
+            print(f"Skipped non-bot comment from {comment.user.login}: {comment.body}")
+
 
 def main():
     parser = ArgumentParser()
@@ -107,6 +152,7 @@ def main():
                                         args.openai_max_tokens)})
 
     if len(comments) > 0:
+        handle_replies(args.github_token, args.openai_api_key, args.openai_model, args.openai_temperature, args.openai_max_tokens)
         pull.create_review(body="**ChatGPT code review**", event="COMMENT", comments=comments)
 
 
