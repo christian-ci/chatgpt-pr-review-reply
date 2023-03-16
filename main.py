@@ -78,7 +78,7 @@ def review(filename: str, content: str, model: str, temperature: float, max_toke
 def handle_replies(github_token: str, github_pr_id: int, api_key: str, model: str, temperature: float, max_tokens: int):
     g = Github(github_token)
     repo = g.get_repo(os.getenv("GITHUB_REPOSITORY"))
-    pull = repo.get_pull(args.github_pr_id)
+    pull = repo.get_pull(github_pr_id)
     openai.api_key = api_key
 
     # Get comments
