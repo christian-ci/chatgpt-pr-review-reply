@@ -75,7 +75,7 @@ def review(filename: str, content: str, model: str, temperature: float, max_toke
     return f"*ChatGPT review for {filename}:*\n" \
            f"{chat_review}"
 
-def handle_replies(github_token: str, api_key: str, model: str, temperature: float, max_tokens: int):
+def handle_replies(github_token: str, github_pr_id: int, api_key: str, model: str, temperature: float, max_tokens: int):
     g = Github(github_token)
     repo = g.get_repo(os.getenv("GITHUB_REPOSITORY"))
     pull = repo.get_pull(args.github_pr_id)
@@ -152,9 +152,8 @@ def main():
                                         args.openai_max_tokens)})
 
     if len(comments) > 0:
-        handle_replies(args.github_token, args.openai_api_key, args.openai_model, args.openai_temperature, args.openai_max_tokens)
+        handle_replies(args.github_token, args.github_pr_id, args.openai_api_key, args.openai_model, args.openai_temperature, args.openai_max_tokens)
         pull.create_review(body="**ChatGPT code review**", event="COMMENT", comments=comments)
-
 
 if __name__ == "__main__":
     main()
