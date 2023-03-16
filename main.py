@@ -84,39 +84,47 @@ def handle_replies(github_token: str, github_pr_id: int, api_key: str, model: st
     # Get comments
     comments = pull.get_issue_comments()
 
-    for comment in comments:
-        if comment.user.login == "github-actions[bot]":
-            # Find replies to the bot's comment
-            replies = [reply for reply in comments if reply.reply_to_id == comment.id and reply.user.login != "github-actions[bot]"]
+    # Gather historical ChatGPT review comments and their corresponding diff codes
+    chatgpt_review_comments = [
+        (comment, comment.body[comment.body.find("```") + 3:comment.body.rfind("```")].strip())
+        for comment in comments
+        if comment.user.login == "github-actions[bot]" and "ChatGPT review" in comment.body
+    ]
 
-            for reply in replies:
-                # Check if the reply is already handled by the bot
-                bot_replies = [bot_reply for bot_reply in comments if bot_reply.reply_to_id == reply.id and bot_reply.user.login == "github-actions[bot]"]
-                if bot_replies:
-                    print(f"Skipped already handled reply from {reply.user.login}: {reply.body}")
-                    continue
+    for comment, diff_code in chatgpt_review_comments:
+        # Find replies to the bot's comment
+        replies = [reply for reply in comments if reply.reply_to_id == comment.id and reply.user.login != "github-actions[bot]"]
 
-                # Get the reply content and generate a response
-                question = reply.body
-                response = openai.Completion.create(
-                    engine=model,
-                    prompt=f"{question}\n\n{reply.original_commit_id}:\n{reply.path} line {reply.original_position}\n```{reply.diff_hunk}```",
-                    temperature=temperature,
-                    max_tokens=max_tokens,
-                    top_p=1,
-                    frequency_penalty=0,
-                    presence_penalty=0,
-                )
+        for reply in replies:
+            # Check if the reply is already handled by the bot
+            bot_replies = [bot_reply for bot_reply in comments if bot_reply.reply_to_id == reply.id and bot_reply.user.login == "github-actions[bot]"]
+            if bot_replies:
+                print(f"Skipped already handled reply from {reply.user.login}: {reply.body}")
+                continue
 
-                # Post the response as a comment reply
-                reply.create_reply(response.choices[0].text)
+            # Get the reply content and generate a response
+            question = reply.body
+            historical_reviews = "\n\n".join([f"{review[0].body}\n\n```{review[1]}```" for review in chatgpt_review_comments])
+            prompt = f"{historical_reviews}\n\n{question}\n\n{reply.original_commit_id}:\n{reply.path} line {reply.original_position}\n```{reply.diff_hunk}```"
+            response = openai.Completion.create(
+                engine=model,
+                prompt=prompt,
+                temperature=temperature,
+                max_tokens=max_tokens,
+                top_p=1,
+                frequency_penalty=0,
+                presence_penalty=0,
+            )
 
-                # You can mark the reply as handled by deleting it, adding a label, or any other method.
-                # In this case, we'll just print that the reply has been handled.
-                print(f"Handled reply from {reply.user.login}: {reply.body}")
+            # Post the response as a comment reply
+            reply.create_reply(response.choices[0].text)
 
-        else:
-            print(f"Skipped non-bot comment from {comment.user.login}: {comment.body}")
+            # In this case, we'll just print that the reply has been handled.
+            print(f"Handled reply from {reply.user.login}: {reply.body}")
+
+    else:
+        print(f"Skipped non-bot comment from {comment.user.login}: {comment.body}")
+
 
 
 def main():
